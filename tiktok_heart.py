@@ -7,9 +7,20 @@ import pyautogui
 from pynput import keyboard as kb
 from pynput import mouse as ms
 
+# Fix DPI scaling trên màn hình laptop/HiDPI
+try:
+    from ctypes import windll
+    windll.shcore.SetProcessDpiAwareness(1)
+except Exception:
+    pass
+
 pyautogui.PAUSE = 0
 
 # ── State ──────────────────────────────────────────────
+HEART_BREAK_AT = 500   # nghỉ sau mỗi X tim
+BREAK_MIN      = 5     # nghỉ tối thiểu (giây)
+BREAK_MAX      = 10    # nghỉ tối đa (giây)
+
 running    = False
 paused     = False
 last_key   = 0
@@ -65,18 +76,42 @@ def heart_loop():
         time.sleep(0.1)
 
     lbl_status.config(text="Đang thả tim ❤️")
+    batch = 0  # đếm tim trong đợt hiện tại
     while running:
         if not paused:
             pressing_l = True
             pyautogui.press('l')
             pressing_l = False
             count += 1
+            batch += 1
+
+            # Dừng hẳn khi đạt giới hạn
+            limit = var_limit.get()
+            if limit > 0 and count >= limit:
+                lbl_status.config(text=f"Đã đạt {limit:,} tim ✅")
+                stop()
+                return
+
+            # Nghỉ sau mỗi HEART_BREAK_AT tim
+            if batch >= HEART_BREAK_AT:
+                batch = 0
+                break_time = random.uniform(BREAK_MIN, BREAK_MAX)
+                lbl_status.config(text=f"Nghỉ {break_time:.0f}s... ⏳")
+                pause_end = time.time() + break_time
+                while time.time() < pause_end and running:
+                    time.sleep(0.1)
+                if running:
+                    lbl_status.config(text="Đang thả tim ❤️")
+
         time.sleep(0.1 if paused else random.uniform(mn, mx))
 
 # ── UI actions ─────────────────────────────────────────
 def start():
     global running, paused, count, start_t, listener
     if running:
+        return
+    if var_limit.get() < 1:
+        lbl_status.config(text="⚠️ Vui lòng chọn giới hạn tim!")
         return
     running  = True
     paused   = False
@@ -113,8 +148,16 @@ def update_ui():
     lbl_time.config(text=f"{m:02d}:{s:02d}")
     lbl_pause.config(text="⏸ Đang chat..." if paused else "")
     lbl_compact_info.config(
-        text=f"❤️ {count}   ⏱ {m:02d}:{s:02d}{'   ⏸' if paused else ''}"
+        text=f"❤️ {count}   ⏱ {m:02d}:{s:02d}"
     )
+    # Compact: ẩn/hiện nút tùy trạng thái chat
+    if is_compact:
+        if paused:
+            cf_btn.pack_forget()
+            cf_chat.pack(side="right", padx=8)
+        else:
+            cf_chat.pack_forget()
+            cf_btn.pack(side="right", padx=8)
     root.after(200, update_ui)
 
 def toggle_pin():
@@ -133,12 +176,12 @@ def toggle_compact():
     if is_compact:
         frame_main.pack_forget()
         frame_compact.pack(fill="x", padx=8, pady=4)
-        root.geometry("360x95")
+        root.geometry("400x95")
         btn_collapse.config(text="Mở rộng")
     else:
         frame_compact.pack_forget()
-        frame_main.pack(fill="both", expand=True, padx=20, pady=14)
-        root.geometry("360x480")
+        frame_main.pack(fill="both", expand=True, padx=14, pady=14)
+        root.geometry("400x505")
         btn_collapse.config(text="Thu gọn")
 
 def show_help():
@@ -216,7 +259,7 @@ def show_help():
 # ── UI layout ──────────────────────────────────────────
 root = tk.Tk()
 root.title("Auto Heart by HoangVi")
-root.geometry("360x480")
+root.geometry("400x505")
 root.resizable(False, False)
 root.configure(bg="#fff")
 
@@ -255,18 +298,27 @@ lbl_compact_info = tk.Label(frame_compact, text="❤️ 0   ⏱ 00:00",
                              bg=C_BG, fg=C_TEXT, font=("Segoe UI", 13, "bold"))
 lbl_compact_info.pack(side="left", padx=10, pady=6)
 
+# Frame chứa nút bình thường
 cf_btn = tk.Frame(frame_compact, bg=C_BG)
 cf_btn.pack(side="right", padx=8)
-tk.Button(cf_btn, text="▶ Bắt đầu", bg=C_RED, fg="white",
+cf_start = tk.Button(cf_btn, text="▶ Bắt đầu", bg=C_RED, fg="white",
           font=("Segoe UI", 9, "bold"), bd=0, relief="flat",
-          cursor="hand2", padx=8, pady=5, command=start).pack(side="left", padx=(0,4))
-tk.Button(cf_btn, text="■ Dừng", bg="#e8e8e8", fg=C_TEXT,
+          cursor="hand2", padx=8, pady=5, command=start)
+cf_start.pack(side="left", padx=(0,4))
+cf_stop = tk.Button(cf_btn, text="■ Dừng", bg="#e8e8e8", fg=C_TEXT,
           font=("Segoe UI", 9), bd=0, relief="flat",
-          cursor="hand2", padx=8, pady=5, command=stop).pack(side="left")
+          cursor="hand2", padx=8, pady=5, command=stop)
+cf_stop.pack(side="left")
+
+# Nút "Đang chat" hiện khi pause
+cf_chat = tk.Button(frame_compact, text="💬 Đang chat...", bg="#f5a623", fg="white",
+                    font=("Segoe UI", 9, "bold"), bd=0, relief="flat",
+                    padx=10, pady=5, state="disabled")
+# Không pack mặc định, chỉ hiện khi paused
 
 # ── Full view ──────────────────────────────────────────
 frame_main = tk.Frame(root, bg=C_BG)
-frame_main.pack(fill="both", expand=True, padx=20, pady=14)
+frame_main.pack(fill="both", expand=True, padx=14, pady=14)
 
 sf = card(frame_main)
 sf.pack(fill="x", pady=(0, 10))
@@ -274,27 +326,48 @@ tk.Label(sf, text="Cài đặt", bg=C_CARD, fg=C_GRAY,
          font=("Segoe UI", 9)).grid(row=0, column=0, columnspan=3,
                                      sticky="w", padx=10, pady=(8,2))
 
-def setting_row(parent, row, label, var, mn, mx, step, fmt):
+def _make_setting_row(parent, row, label, var, mn, mx, step, fmt, is_int=False):
+    # Column 0: label cố định 140px
+    # Column 1: slider fill phần còn lại
+    # Column 2: giá trị cố định 60px
+    parent.columnconfigure(0, minsize=140)
+    parent.columnconfigure(1, weight=1)
+    parent.columnconfigure(2, minsize=60)
+
     tk.Label(parent, text=label, bg=C_CARD, fg=C_TEXT,
-             font=("Segoe UI", 10), width=18, anchor="w"
-             ).grid(row=row, column=0, padx=(10,4), pady=4)
+             font=("Segoe UI", 10), anchor="w"
+             ).grid(row=row, column=0, padx=(10,4), pady=4, sticky="w")
+
     ttk.Scale(parent, from_=mn, to=mx, variable=var,
-              orient="horizontal", length=120).grid(row=row, column=1, padx=4)
+              orient="horizontal").grid(row=row, column=1, padx=4, sticky="ew")
+
     lv = tk.Label(parent, bg=C_CARD, fg=C_RED,
-                  font=("Segoe UI", 10, "bold"), width=7, anchor="w")
-    lv.grid(row=row, column=2, padx=(4,10))
+                  font=("Segoe UI", 10, "bold"), anchor="e")
+    lv.grid(row=row, column=2, padx=(4,10), sticky="e")
+
     def upd(*_):
         v = round(float(var.get()) / step) * step
+        if is_int:
+            v = max(mn, min(mx, int(v)))
+            var.set(v)
         lv.config(text=fmt.format(v))
     var.trace_add("write", upd)
     upd()
 
+def setting_row_int(parent, row, label, var, mn, mx, step, fmt):
+    _make_setting_row(parent, row, label, var, mn, mx, step, fmt, is_int=True)
+
+def setting_row(parent, row, label, var, mn, mx, step, fmt):
+    _make_setting_row(parent, row, label, var, mn, mx, step, fmt, is_int=False)
+
+var_limit  = tk.IntVar(value=3000)
 var_min    = tk.DoubleVar(value=0.2)
 var_max    = tk.DoubleVar(value=0.8)
 var_delay  = tk.DoubleVar(value=5.0)
-setting_row(sf, 1, "Tối thiểu (giây)",  var_min,    0.1, 2.0,  0.1, "{:.1f}s")
-setting_row(sf, 2, "Tối đa (giây)",     var_max,    0.2, 5.0,  0.1, "{:.1f}s")
-setting_row(sf, 3, "Thời gian chờ",     var_delay,  1.0, 10.0, 0.1, "{:.1f}s")
+setting_row_int(sf, 1, "Giới hạn tim",  var_limit,  1, 100000, 1000, "{:,}")
+setting_row(sf, 2, "Tối thiểu (giây)",  var_min,    0.1, 2.0,  0.1, "{:.1f}s")
+setting_row(sf, 3, "Tối đa (giây)",     var_max,    0.2, 5.0,  0.1, "{:.1f}s")
+setting_row(sf, 4, "Thời gian chờ",     var_delay,  1.0, 10.0, 0.1, "{:.1f}s")
 
 stf = card(frame_main)
 stf.pack(fill="x", pady=(0, 10))
